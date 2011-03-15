@@ -1,4 +1,4 @@
-# cov_calc.py
+# covariance.py
 # Calculate covariences for the EKalman filter.
 # Author: Yanglei Zhao
 #############################
