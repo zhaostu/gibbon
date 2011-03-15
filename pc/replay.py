@@ -4,7 +4,7 @@
 #############################
 
 import sys
-from imu import *
+from gibbon import *
 
 def main():
     db = Database(sys.argv[1])

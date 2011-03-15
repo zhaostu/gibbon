@@ -5,7 +5,7 @@
 
 import traceback
 
-from imu import *
+from gibbon import *
 
 def loop(sc, nr, db):
     timeout = 0
