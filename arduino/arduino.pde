@@ -100,10 +100,13 @@ void readHMC5843(){
 void calibrateHMC5843(){
   // Set calibrate mode.
   writeHMC5843(HMC5843_CRA, 0x11);
+  // For some reason, I have to delay 50ms here.
+  delay(50);
   // Set single-conversion mode.
   writeHMC5843(HMC5843_MR, 0x01);
   readHMC5843();
   // Set back to normal mode.
+  delay(50);
   writeHMC5843(HMC5843_CRA, 0x10);
 
   scale_hmc5843[0] = 715.0 / raw[6];
@@ -112,10 +115,11 @@ void calibrateHMC5843(){
 }
 
 void initHMC5843(){
-  // Wait 5ms for hmc5843 as said on datasheet.
-  delay(5);
+  // Wait 8ms for hmc5843 as said on datasheet.
+  delay(10);
   // Calibrate the HMC5843
-  // calibrateHMC5843();
+  calibrateHMC5843();
+  delay(50);
   // Change to continous mode.
   writeHMC5843(HMC5843_MR, 0x00);
 }
@@ -133,13 +137,13 @@ void readRaw(){
   raw[3] = analogRead(gxpin);
   raw[4] = analogRead(gypin);
   raw[5] = analogRead(gzpin);
-  
   // Read HMC5843.
   if(t - t_hmc5843 > 100000){
     readHMC5843();
     normalizeHMC5843();
     t_hmc5843 = t;
   }
+  
 }
 
 void normalizeHMC5843(){
