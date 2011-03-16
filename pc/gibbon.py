@@ -108,19 +108,19 @@ class Normalizer():
 
     def align_axis(self, data):
         '''
-        The IMU axis are not aligned. This function helps align the IMU data.
+        The device's axis are not aligned. This function helps align the data.
         '''
         # For this device
         # x =  ay, y = -ax, z =  gz
         # x =  gx, y =  gy, z =  gz
-        # x = -mx, y = -my, z = -mz
+        # x = -mx, y =  my, z = -mz
         # We need to change the accelerometer data to align the axis.
         temp = data[0]
         data[0] = data[1]
         data[1] = -temp
-
+        
+        # As well as the magnetometer
         data[6] = -data[6]
-        data[7] = -data[7]
         data[8] = -data[8]
         return data
         
@@ -154,15 +154,17 @@ class Database():
         WHERE id = ?;'''
 
         if file_name == None:
-            fname = time.strftime('%b%d%H%M%S%Y') + '.sqlite3'
+            fname = time.strftime('%b%d%H%M%S%Y') + '.gib'
         else:
             fname = file_name
 
         self._filename = fname
         self.conn = sqlite3.connect(fname)
 
-        if file_name == None:
+        try:
             self.conn.execute(self.SQL_CREATE_TABLE)
+        except:
+            pass
 
         self.conn.row_factory = sqlite3.Row
         self.cur = self.conn.cursor()

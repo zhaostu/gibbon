@@ -6,7 +6,7 @@
 import time
 import traceback
 
-from imu import *
+from gibbon import *
 
 def loop(sc):
     timeout = 0
