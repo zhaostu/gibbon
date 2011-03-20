@@ -1,8 +1,7 @@
 # imu.py
-# The supporting library for the IMU
+# The supporting library for the sensors on Arduino board.
 # Author: Yanglei Zhao
 #############################
-
 
 import struct
 import serial
@@ -18,7 +17,59 @@ RAW_LEN = 9
 HEAD_LEN = 8
 COM = 'COM6'
 
-class SerialCom():
+class Parameters(object):
+    # Calibrated rest level.
+    SENSOR_ZERO_LEVEL = [505, 504, 507, 386, 384, 382, 0, 0, 0]
+    # Calibrated sensitivity. (Because the z-axis gyro is on a different chip, the
+    # data for z-axis gyro is slightly different from the x/y-axis gyro.
+    SENSOR_SENSITIVITY = [102, 103, 102, 15.9142, 15.8326, 14.2891, 1300, 1300, 1300]
+
+    # This is the covariance matrix for the noise in the gyroscope,
+    # represented by quaternions. Should be used as Q matrix in the EKalman.
+    # Static
+    GYRO_ERR_COV_S = np.matrix(
+        [[ 4.80574003e-01,  2.77505891e-03, -8.69992105e-04, -4.03247783e-04],
+         [ 2.77505891e-03,  9.19282667e-02,  5.28045224e-05, -2.45922986e-03],
+         [-8.69992105e-04,  5.28045224e-05,  8.54215839e-02,  5.30840124e-03],
+         [-4.03247783e-04, -2.45922986e-03,  5.30840124e-03,  6.06963705e-02]])
+
+    # Dynamic
+    GYRO_ERR_COV_D = np.matrix(
+        [[ 4.98022904e-01, -4.73826515e-04,  1.52772269e-04,  1.35944826e-03],
+         [-4.73826515e-04,  1.73284439e-01, -5.02642964e-03,  2.74398575e-02],
+         [ 1.52772269e-04, -5.02642964e-03,  1.59915122e-01,  7.54602092e-03],
+         [ 1.35944826e-03,  2.74398575e-02,  7.54602092e-03,  1.68741929e-01]])
+
+    # The covariance matrix for the noise in the accelerometer. Should be used
+    # as R matrix in the EKalman.
+    # Static
+    ACC_ERR_COV_S = np.matrix(
+        [[ 2.08766874e-04,  3.23583653e-06, -4.37264738e-05],
+         [ 3.23583653e-06,  2.31599267e-04, -5.04887598e-05],
+         [-4.37264738e-05, -5.04887598e-05,  2.49027804e-04]])
+
+    # Dynamic
+    ACC_ERR_COV_D = np.matrix(
+        [[ 0.08552561, -0.00511642, -0.00672479],
+         [-0.00511642,  0.06799363, -0.00108495],
+         [-0.00672479, -0.00108495,  0.10689232]])
+
+    @classmethod
+    def acc_h(cls, x):
+        q = x.A
+        return np.matrix([[2*q[1]*q[3]-2*q[2]*q[0]],
+                          [2*q[2]*q[3]+2*q[1]*q[0]],
+                          [1-2*q[1]*q[1]-2*q[2]*q[2]]])
+
+    @classmethod
+    def acc_H(cls, xminus):
+        q = xminus.A
+        return np.matrix([[-2*q[2], 2*q[3], -2*q[0], 2*q[1]],
+                          [2*q[1], 2*q[0], 2*q[3], 2*q[2]],
+                          [0, -4*q[1], -4*q[2], 0]])
+
+
+class SerialCom(object):
     def __init__(self, mode=0):
         '''
         mode=0: the auto mode, the Arduino will sequencially send data to PC.
@@ -68,13 +119,10 @@ class SerialCom():
         if 'ser' in dir(self):
             self.ser.close()
 
-class Normalizer():
+class Normalizer(object):
     def __init__(self):
-        # Calibrated rest level.
-        self.zero_level = [505, 504, 507, 386, 384, 382, 0, 0, 0]
-        # Calibrated sensitivity. (Because the z-axis gyro is on a different chip, the
-        # data for z-axis gyro is slightly different from the x/y-axis gyro.
-        self.sensitivity = [102, 103, 102, 15.9142, 15.8326, 14.2891, 1300, 1300, 1300]
+        self.zero_level = Parameters.SENSOR_ZERO_LEVEL
+        self.sensitivity = Parameters.SENSOR_SENSITIVITY
 
     def balance(self, raw):
         '''
@@ -125,7 +173,7 @@ class Normalizer():
         return data
         
 
-class Database():
+class Database(object):
     def __init__(self, file_name=None):
         self.SQL_CREATE_TABLE = '''CREATE TABLE data
         (id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -148,13 +196,8 @@ class Database():
 
         self.SQL_SELECT_DATA = '''SELECT * FROM data;'''
 
-        self.SQL_UPDATE_DATA = '''UPDATE data SET
-        ax = ?, ay = ?, az = ?, gx = ?, gy = ?, gz = ?,
-        mx = ?, my = ?, mz = ?
-        WHERE id = ?;'''
-
         if file_name == None:
-            fname = time.strftime('%b%d%H%M%S%Y') + '.gib'
+            fname = time.strftime('%H%M%S-%b%d%Y') + '.gib'
         else:
             fname = file_name
 
@@ -186,21 +229,12 @@ class Database():
         self.cur.execute(self.SQL_SELECT_DATA)
         return self.cur.fetchall()
 
-    def update_data(self, id, data):
-        '''
-        Update the data part (rather than the raw part) of a row with id = id.
-        data: Array of length 6 with float values.
-        '''
-        para = list(data)
-        para.append(id)
-        self.cur.execute(self.SQL_UPDATE_DATA, para)
-
     def __del__(self):
         if 'conn' in dir(self):
             self.conn.commit()
             self.conn.close()
 
-class Quaternion():
+class Quaternion(object):
     def __init__(self, array=[1, 0, 0, 0]):
         '''
         array: a length 4 array, default to a zero-rotation
@@ -212,6 +246,7 @@ class Quaternion():
                 self.q = np.matrix(array)
             else:
                 raise Exception('Shape of the matrix or ndarray is not valid')
+
         elif type(array) in (list, tuple):
             if len(array) == 4:
                 self.q = np.matrix(array).T
@@ -249,36 +284,6 @@ class Quaternion():
         q3 = v[2] * np.sin(theta / 2)
         return cls([q0, q1, q2, q3])
 
-    def __mul__(self, q2):
-        '''
-        Quaternion multiplication. 
-        '''
-
-        return Quaternion(self.matrix_repr * q2.M)
-
-    def __neg__(self):
-        '''
-        Negative of the Quaternion.
-        '''
-        a = self.A
-        a[1] = -a[1]
-        a[2] = -a[2]
-        a[3] = -a[3]
-        return Quaternion(a)
-        
-
-    def normalize(self):
-        q = self.q.A1
-        s = 0
-        for axis in q:
-            s += axis * axis
-
-        s = np.sqrt(s)
-        a = []
-        for axis in q:
-            a.append(axis / s)
-        self.q = np.matrix(a).T
-        
     @property
     def matrix_repr(self):
         qa = self.q.A1 # array
@@ -302,10 +307,10 @@ class Quaternion():
     @property
     def A(self):
         '''
-        To array form (1d)
+        To flattened array form.
         '''
         return self.q.A1
-        
+
     @property
     def RM(self):
         '''
@@ -319,118 +324,85 @@ class Quaternion():
                         [-qa[2], qa[1], 0]])
         
         return ((qa[0] * qa[0] - q3.T * q3).A1[0] * I + 2 * q3 * q3.T + \
-               2 * qa[0] * QQ).A    
+               2 * qa[0] * QQ).A
 
-class EKalman():
+    def __mul__(self, q2):
+        '''
+        Quaternion multiplication.
+        '''
+
+        return Quaternion(self.matrix_repr * q2.M)
+
+    def __neg__(self):
+        '''
+        Negative of the Quaternion.
+        '''
+        a = self.A
+        a[1] = -a[1]
+        a[2] = -a[2]
+        a[3] = -a[3]
+        return Quaternion(a)
+
+    def normalize(self):
+        q = self.q.A1
+        s = 0
+        for axis in q:
+            s += axis * axis
+
+        s = np.sqrt(s)
+        a = []
+        for axis in q:
+            a.append(axis / s)
+        self.q = np.matrix(a).T
+        
+
+class EKalman(object):
     '''
     The Kalman Filter class for the IMU.
     '''
-    def __init__(self, array=[1, 0, 0, 0], mode='x'):
-        # Q Matrix in static motions.
-        self.Q_s = np.matrix(
-        [[ 4.80574003e-01,  2.77505891e-03, -8.69992105e-04, -4.03247783e-04],
-         [ 2.77505891e-03,  9.19282667e-02,  5.28045224e-05, -2.45922986e-03],
-         [-8.69992105e-04,  5.28045224e-05,  8.54215839e-02,  5.30840124e-03],
-         [-4.03247783e-04, -2.45922986e-03,  5.30840124e-03,  6.06963705e-02]])
-
-        # Q Matrix in dynamic motions.
-        self.Q_d = np.matrix(
-        [[ 4.98022904e-01, -4.73826515e-04,  1.52772269e-04,  1.35944826e-03],
-         [-4.73826515e-04,  1.73284439e-01, -5.02642964e-03,  2.74398575e-02],
-         [ 1.52772269e-04, -5.02642964e-03,  1.59915122e-01,  7.54602092e-03],
-         [ 1.35944826e-03,  2.74398575e-02,  7.54602092e-03,  1.68741929e-01]])
-
-
-        # R Matrix in static motions for Accelerometer.
-        self.RA_s = np.matrix(
-                        [[ 2.08766874e-04,  3.23583653e-06, -4.37264738e-05],
-                         [ 3.23583653e-06,  2.31599267e-04, -5.04887598e-05],
-                         [-4.37264738e-05, -5.04887598e-05,  2.49027804e-04]])
-
-        # R_ Matrix in dynamic motions for Accelerometer.
-        self.RA_d = np.matrix(
-                        [[ 0.08552561, -0.00511642, -0.00672479],
-                         [-0.00511642,  0.06799363, -0.00108495],
-                         [-0.00672479, -0.00108495,  0.10689232]])
-        
+    def __init__(self, array=[1, 0, 0, 0]):
         self.x = Quaternion(array)
-
-        if mode not in 'xsd':
-            raise Exception('Mode of the EKalman Filter is not valid.')
-
-        self.mode = mode
-
-        if self.mode == 'd':
-            self.Q = self.Q_d
-            self.R = self.R_d
-        else:
-            self.Q = self.Q_s
-            self.R = self.R_s
-
         self.p = self.Q
 
-    def h(self, x):
-        q = x.A
-        return np.matrix([[2*q[1]*q[3]-2*q[2]*q[0]],
-                          [2*q[2]*q[3]+2*q[1]*q[0]],
-                          [1-2*q[1]*q[1]-2*q[2]*q[2]]])
-
-    def H(self):
-        q = self.xminus.A
-        return np.matrix([[-2*q[2], 2*q[3], -2*q[0], 2*q[1]],
-                          [2*q[1], 2*q[0], 2*q[3], 2*q[2]],
-                          [0, -4*q[1], -4*q[2], 0]])
-
-    def normalize(self, acc):
+    def normalize(self, data):
         s = 0
-        for axis in acc:
+        for axis in data:
             s += axis*axis
 
         s = np.sqrt(s)
 
         a = []
-        for axis in acc:
+        for axis in data:
             a.append(axis / s)
 
         return a
-    
-    def naive_update(self, gyro, dt):
+
+    def naive_time_update(self, gyro, dt):
         q = Quaternion.from_gyro(gyro, dt)
         self.x = self.x * q
 
-    def time_update(self, gyro, dt):
+    def time_update(self, gyro, dt, Q):
+        '''
+        The time update phase of the EKF.
+        '''
         q = Quaternion.from_gyro(gyro, dt)
         # The rotation represented by quaternion
         # q1 * q2 means apply q2 first about XYZ,
         # then apply q1 about XYZ, which is equavalent to
         # apply q1 first about XYZ, then q2 about xyz.
-        if self.mode == 'x':
-            if q.A[0] / dt > 0.8:
-                self.Q = self.Q_s
-                self.R = self.R_s
-            else:
-                self.Q = self.Q_d
-                self.R = self.R_d
-                
+
         self.xminus = self.x * q
         A = q.matrix_repr
-        self.pminus = A * self.p * A.T + self.Q
-    
-    def measurement_update(self, acc):
-        I = np.identity(4)
-        z = np.matrix(self.normalize(acc)).T
-        H = self.H()
-        
-        K = self.pminus * H.T * ((H * self.pminus * H.T + self.R).I)
-        self.x = Quaternion(self.xminus.M + K * (z - self.h(self.xminus)))
-        self.p = (I - K * H) * self.pminus
+        self.pminus = A * self.p * A.T + Q
 
-    def measurement_update_mag(self, mag):
+    def measurement_update(self, data, R, H):
+        '''
+        The measurement update phase of the EKF.
+        '''
         I = np.identity(4)
         z = np.matrix(self.normalize(acc)).T
-        H = self.H()
         
-        K = self.pminus * H.T * ((H * self.pminus * H.T + self.R).I)
+        K = self.pminus * H.T * ((H * self.pminus * H.T + R).I)
         self.x = Quaternion(self.xminus.M + K * (z - self.h(self.xminus)))
         self.p = (I - K * H) * self.pminus
     
@@ -438,7 +410,7 @@ class EKalman():
     def quat(self):
         return self.x
         
-class Plotter():
+class Plotter(object):
     def __init__(self):
         self.COLORS = ['r', 'g', 'b', 'c', 'm', 'y', 'k', 'w']
 
@@ -460,7 +432,7 @@ class Plotter():
 
         plt.show()
 
-class Visualizer():
+class Visualizer(object):
     def __init__(self, quat):
         # For converting
         self.rt_mx = np.matrix([[1, 0, 0],

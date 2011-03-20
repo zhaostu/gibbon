@@ -1,5 +1,5 @@
 # recorder.py
-# Record Arduino serial data of IMU into Sqlite database for later usage.
+# Record Arduino serial data of the sensors into Sqlite database for later usage.
 # Author: Yanglei Zhao
 #############################
 
