@@ -54,20 +54,42 @@ class Parameters(object):
          [-0.00511642,  0.06799363, -0.00108495],
          [-0.00672479, -0.00108495,  0.10689232]])
 
+    # The components of vector of the magnetic field, on the
+    # x axis and z axis.
+    MAG_X = 0.4375
+    MAG_Z = 0.75
+
     @classmethod
     def acc_h(cls, x):
         q = x.A
-        return np.matrix([[2*q[1]*q[3]-2*q[2]*q[0]],
-                          [2*q[2]*q[3]+2*q[1]*q[0]],
-                          [1-2*q[1]*q[1]-2*q[2]*q[2]]])
+        return np.matrix([[2*(q[1]*q[3]-q[2]*q[0])],
+                          [2*(q[2]*q[3]+q[1]*q[0])],
+                          [1-2*(q[1]*q[1]+q[2]*q[2])]])
 
     @classmethod
-    def acc_H(cls, xminus):
-        q = xminus.A
+    def acc_H(cls, x):
+        q = x.A
         return np.matrix([[-2*q[2], 2*q[3], -2*q[0], 2*q[1]],
                           [2*q[1], 2*q[0], 2*q[3], 2*q[2]],
                           [0, -4*q[1], -4*q[2], 0]])
 
+    @classmethod
+    def mag_h(cls, x):
+        q = x.A
+        X = cls.MAG_X
+        Z = cls.MAG_Z
+        return np.matrix([[X-2*X*(q[2]*q[2]+q[3]*q[3]) + Z*2*(q[1]*q[3]-q[2]*q[0])],
+                          [X*2*(q[1]*q[2]-q[0]*q[3]) + Z*2*(q[2]*q[3]+q[1]*q[0])],
+                          [X*2*(q[1]*q[3]+q[0]*q[2]) + Z-2*Z*(q[1]*q[1]+q[2]*q[2]))]])
+
+    @classmethod
+    def mag_H(cls, x):
+        q = x.A
+        X = cls.MAG_X
+        Z = cls.MAG_Z
+        return np.matrix([[-2*Z*q[2], 2*Z*q[3], -4*X*q[2]-2*Z*q[0], -4*X*q[3]+2*Z*q[1]],
+                          [2*(Z*q[1]-X*q[3]), 2*(X*q[2]+Z*q[0]), 2*(X*q[1]+Z*q[3]), 2*(Z*q[2]-X*q[0])],
+                          [2*X*q[2], 2*X*q[3]-4*Z*q[1], 2*X*q[0]-4*Z*q[2], 2*X*q[1]]])
 
 class SerialCom(object):
     def __init__(self, mode=0):
@@ -235,6 +257,7 @@ class Database(object):
             self.conn.close()
 
 class Quaternion(object):
+    SUB_GRID = np.ix_([1,2,3], [1,2,3])
     def __init__(self, array=[1, 0, 0, 0]):
         '''
         array: a length 4 array, default to a zero-rotation
@@ -295,7 +318,13 @@ class Quaternion(object):
 
     @property
     def neg_matrix_repr(self):
-        pass
+        qa = self.q.A1
+        qm = np.matrix([[qa[0], -qa[1], -qa[2], -qa[3]],
+                         [qa[1], qa[0], qa[3], -qa[2]],
+                         [qa[2], -qa[3], qa[0], qa[1]],
+                         [qa[3], qa[2], -qa[1], qa[0]]])
+
+        return qm
 
     @property
     def M(self):
@@ -316,21 +345,12 @@ class Quaternion(object):
         '''
         -> The corresponding rotation matrix of the quaternion.
         '''
-        qa = self.q.A1
-        I = np.identity(3)
-        q3 = np.matrix([qa[1], qa[2], qa[3]]).T
-        QQ = np.matrix([[0, -qa[3], qa[2]],
-                        [qa[3], 0, -qa[1]],
-                        [-qa[2], qa[1], 0]])
-        
-        return ((qa[0] * qa[0] - q3.T * q3).A1[0] * I + 2 * q3 * q3.T + \
-               2 * qa[0] * QQ).A
+        return (self.neg_matrix_repr.T * self.matrix_repr)[self.SUB_GRID]
 
     def __mul__(self, q2):
         '''
         Quaternion multiplication.
         '''
-
         return Quaternion(self.matrix_repr * q2.M)
 
     def __neg__(self):
@@ -354,7 +374,6 @@ class Quaternion(object):
         for axis in q:
             a.append(axis / s)
         self.q = np.matrix(a).T
-        
 
 class EKalman(object):
     '''
@@ -395,15 +414,17 @@ class EKalman(object):
         A = q.matrix_repr
         self.pminus = A * self.p * A.T + Q
 
-    def measurement_update(self, data, R, H):
+    def measurement_update(self, data, R, h_func, H_func):
         '''
         The measurement update phase of the EKF.
         '''
         I = np.identity(4)
-        z = np.matrix(self.normalize(acc)).T
-        
-        K = self.pminus * H.T * ((H * self.pminus * H.T + R).I)
-        self.x = Quaternion(self.xminus.M + K * (z - self.h(self.xminus)))
+        z = np.matrix(self.normalize(data)).T
+
+        H = H_func(self.xminus)
+
+        K = self.pminus * H.T * (H * self.pminus * H.T + R).I
+        self.x = Quaternion(self.xminus.M + K * (z - h_func(self.xminus)))
         self.p = (I - K * H) * self.pminus
     
     @property
