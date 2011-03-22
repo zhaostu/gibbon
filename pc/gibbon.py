@@ -303,7 +303,7 @@ class Quaternion(object):
         else:
             raise Exception('Not valid parameter "array", type %s' % type(array))
 
-        self.normalize()
+        self.unitize()
 
     @classmethod
     def from_gyro(cls, gyro, dt):
