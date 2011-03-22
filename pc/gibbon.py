@@ -161,6 +161,16 @@ class Normalizer(object):
         self.zero_level = Parameters.SENSOR_ZERO_LEVEL
         self.sensitivity = Parameters.SENSOR_SENSITIVITY
 
+    def normalize(self, raw):
+        '''
+        -> data: the normalized IMU data.
+        raw: the raw IMU data.
+        '''
+        data = []
+        for i in range(RAW_LEN):
+            data.append((raw[i] - self.zero_level[i]) * 1.0 / self.sensitivity[i])
+        return self.align_axis(data)
+
     def balance(self, raw):
         '''
         Balance the raw data by subtract the raw data by self.zero_level.
@@ -173,23 +183,13 @@ class Normalizer(object):
 
     def scale(self, raw):
         '''
-        Scale the raw data by divide the raw data by self.sensitivity.
+        Scale the raw data by divide the raw data by sensitivity.
         '''
         data = []
         for i in range(RAW_LEN):
             data.append(raw[i] * 1.0 / self.sensitivity[i])
 
         return data
-
-    def normalize(self, raw):
-        '''
-        -> data: the normalized IMU data.
-        raw: the raw IMU data.
-        '''
-        data = []
-        for i in range(RAW_LEN):
-            data.append((raw[i] - self.zero_level[i]) * 1.0 / self.sensitivity[i])
-        return self.align_axis(data)
 
     def align_axis(self, data):
         '''
@@ -208,6 +208,15 @@ class Normalizer(object):
         data[6] = -data[6]
         data[8] = -data[8]
         return data
+
+    def get_h_mag(self, mag, gravity):
+        '''
+        Get the horizontal projection of the magnetic field vector by removing
+        component toward gravity.
+        '''
+        mag = np.array(mag)
+        gravity = np.array(gravity)
+        return mag - gravity / np.dot(gravity, gravity) * np.dot(gravity, mag)
 
 class Database(object):
     def __init__(self, file_name=None):
