@@ -76,6 +76,20 @@ class Parameters(object):
     @classmethod
     def mag_h(cls, x):
         q = x.A
+        return np.matrix([[1-2*(q[2]*q[2]+q[3]*q[3])],
+                          [2*(q[1]*q[2]-q[0]*q[3])],
+                          [2*(q[1]*q[3]+q[0]*q[2])]])
+
+    @classmethod
+    def mag_H(cls, x):
+        q = x.A
+        return np.matrix([[0, 0, -4*q[2], -4*q[3]],
+                          [-2*q[3], 2*q[2], 2*q[1], -2*q[0]],
+                          [2*q[2], 2*q[3], 2*q[0], 2*q[1]]])
+
+    @classmethod
+    def mag_h_old(cls, x):
+        q = x.A
         X = cls.MAG_X
         Z = cls.MAG_Z
         return np.matrix([[X-2*X*(q[2]*q[2]+q[3]*q[3]) + Z*2*(q[1]*q[3]-q[2]*q[0])],
@@ -83,7 +97,7 @@ class Parameters(object):
                           [X*2*(q[1]*q[3]+q[0]*q[2]) + Z-2*Z*(q[1]*q[1]+q[2]*q[2]))]])
 
     @classmethod
-    def mag_H(cls, x):
+    def mag_H_old(cls, x):
         q = x.A
         X = cls.MAG_X
         Z = cls.MAG_Z
@@ -91,6 +105,7 @@ class Parameters(object):
                           [2*(Z*q[1]-X*q[3]), 2*(X*q[2]+Z*q[0]), 2*(X*q[1]+Z*q[3]), 2*(Z*q[2]-X*q[0])],
                           [2*X*q[2], 2*X*q[3]-4*Z*q[1], 2*X*q[0]-4*Z*q[2], 2*X*q[1]]])
 
+#################### Data processing ####################
 class SerialCom(object):
     def __init__(self, mode=0):
         '''
@@ -193,7 +208,6 @@ class Normalizer(object):
         data[6] = -data[6]
         data[8] = -data[8]
         return data
-        
 
 class Database(object):
     def __init__(self, file_name=None):
@@ -256,6 +270,7 @@ class Database(object):
             self.conn.commit()
             self.conn.close()
 
+#################### The model ####################
 class Quaternion(object):
     SUB_GRID = np.ix_([1,2,3], [1,2,3])
     def __init__(self, array=[1, 0, 0, 0]):
@@ -363,17 +378,33 @@ class Quaternion(object):
         a[3] = -a[3]
         return Quaternion(a)
 
-    def normalize(self):
-        q = self.q.A1
-        s = 0
-        for axis in q:
-            s += axis * axis
+    def unitize(self):
+        self.q = q / np.linalg.norm(self.q)
 
-        s = np.sqrt(s)
-        a = []
-        for axis in q:
-            a.append(axis / s)
-        self.q = np.matrix(a).T
+class AccSequence(object):
+    INF = float('nan')
+    
+    def __init__(self, array):
+        self.s = np.array(array)
+
+    def dtw_distance(self, seq, w):
+        dtw = np.empty(len(self.s)+1, len(seq.s)+1)
+        for i in xrange(len(self.s) + 1):
+            dtw[i][0] = self.INF
+
+        for i in xrange(len(seq.s) + 1):
+            dtw[0][i] = self.INF
+
+        dtw[0][0] = 0
+        for i in xrange(len(self.s)):
+            for j in xrange(max(0, i-w), min(len(seq.s), i+w)):
+                dtw[i+1][j+1] = self.dist(self.s[i], seq.s[j]) +\
+                    np.nanmin(dtw[i][j+1], dtw[i][j], dtw[i+1][j])
+
+        return dtw[len(self.s)][len(seq.s)] * 1.0 / (len(self.s) + len(seq.s))
+
+    def dist(self, a, b):
+        return np.linalg.norm(a-b)
 
 class EKalman(object):
     '''
@@ -383,18 +414,9 @@ class EKalman(object):
         self.x = Quaternion(array)
         self.p = self.Q
 
-    def normalize(self, data):
-        s = 0
-        for axis in data:
-            s += axis*axis
-
-        s = np.sqrt(s)
-
-        a = []
-        for axis in data:
-            a.append(axis / s)
-
-        return a
+    def unitize(self, data):
+        v = np.array(data)
+        return v / np.linalg.norm(v)
 
     def naive_time_update(self, gyro, dt):
         q = Quaternion.from_gyro(gyro, dt)
@@ -419,7 +441,7 @@ class EKalman(object):
         The measurement update phase of the EKF.
         '''
         I = np.identity(4)
-        z = np.matrix(self.normalize(data)).T
+        z = np.matrix(self.unitize(data)).T
 
         H = H_func(self.xminus)
 
@@ -430,7 +452,8 @@ class EKalman(object):
     @property
     def quat(self):
         return self.x
-        
+
+#################### Visualizing ####################
 class Plotter(object):
     def __init__(self):
         self.COLORS = ['r', 'g', 'b', 'c', 'm', 'y', 'k', 'w']
