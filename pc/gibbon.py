@@ -420,9 +420,9 @@ class EKalman(object):
     '''
     The Kalman Filter class for the IMU.
     '''
-    def __init__(self, array=[1, 0, 0, 0]):
+    def __init__(self, array=[1, 0, 0, 0], Q=Parameters.GYRO_ERR_COV):
         self.x = Quaternion(array)
-        self.p = self.Q
+        self.p = Q
 
     def unitize(self, data):
         v = np.array(data)
