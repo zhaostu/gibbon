@@ -94,7 +94,7 @@ class Parameters(object):
         Z = cls.MAG_Z
         return np.matrix([[X-2*X*(q[2]*q[2]+q[3]*q[3]) + Z*2*(q[1]*q[3]-q[2]*q[0])],
                           [X*2*(q[1]*q[2]-q[0]*q[3]) + Z*2*(q[2]*q[3]+q[1]*q[0])],
-                          [X*2*(q[1]*q[3]+q[0]*q[2]) + Z-2*Z*(q[1]*q[1]+q[2]*q[2]))]])
+                          [X*2*(q[1]*q[3]+q[0]*q[2]) + Z-2*Z*(q[1]*q[1]+q[2]*q[2])]])
 
     @classmethod
     def mag_H_old(cls, x):
@@ -196,13 +196,12 @@ class Normalizer(object):
         The device's axis are not aligned. This function helps align the data.
         '''
         # For this device
-        # x =  ay, y = -ax, z =  gz
+        # x = -ax, y = -ay, z =  gz
         # x =  gx, y =  gy, z =  gz
         # x = -mx, y =  my, z = -mz
         # We need to change the accelerometer data to align the axis.
-        temp = data[0]
-        data[0] = data[1]
-        data[1] = -temp
+        data[0] = -data[0]
+        data[1] = -data[1]
         
         # As well as the magnetometer
         data[6] = -data[6]
@@ -388,13 +387,23 @@ class Quaternion(object):
         return Quaternion(a)
 
     def unitize(self):
-        self.q = q / np.linalg.norm(self.q)
+        self.q = self.q / np.linalg.norm(self.q)
 
 class AccSequence(object):
     INF = float('nan')
     
     def __init__(self, array):
         self.s = np.array(array)
+        for i in xrange(len(self.s)):
+            for j in xrange(self.s[i]):
+                if self.s[i][j] >= 2:
+                    self.s[i][j] = 1.6
+                elif self.s[i][j] <= -2:
+                    self.s[i][j] = -1.6
+                elif self.s[i][j] >= 1:
+                    self.s[i][j] = (self.s[i][j] - 1) / 2 + 1
+                elif self.s[i][j] <= -1:
+                    self.s[i][j] = (self.s[i][j] + 1) / 2 - 1
 
     def dtw_distance(self, seq, w):
         dtw = np.empty(len(self.s)+1, len(seq.s)+1)

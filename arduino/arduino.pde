@@ -1,17 +1,17 @@
 /*
- Sparkfun 6DOF IMU + 
+ Sparkfun 6DOF IMU + Honeywell 3-axis Magnetometer.
  
  Reads from Analog Devices Sparkfun 6DOF IMU accelerometer/gyroscope,
- plus the HMC5843 2C 3-axis magnetometer and communicates the data
+ plus the HMC5843 I2C 3-axis magnetometer and communicates the data
  to the serial port. 
  
  The circuit:
- analog 0: accl z-axis
- analog 1: accl y-axis
- analog 2: accl x-axis
- analog 3: gyro y-axis
- analog 4: gyro x-axis
- analog 5: gyro z-axis
+ analog 8: accl z-axis
+ analog 9: accl y-axis
+ analog 10: accl x-axis
+ analog 4: gyro y-axis
+ analog 5: gyro x-axis
+ analog 6: gyro z-axis
  Wire    : magnetometer
 */
 
@@ -28,12 +28,12 @@
 #define HMC5843_DX           (0x03) // data X msb
 
 // these constants describe the pins. They won't change:
-const int axpin = A2; // x-axis of the accelerometer
-const int aypin = A1; // y-axis of the accelerometer
-const int azpin = A0; // z-axis of the accelerometer
-const int gxpin = A4; // x-axis of the gyroscope
-const int gypin = A3; // y-axis of the gyroscope
-const int gzpin = A5; // z-axis of the gyroscope
+const int axpin = A10; // x-axis of the accelerometer
+const int aypin = A9; // y-axis of the accelerometer
+const int azpin = A8; // z-axis of the accelerometer
+const int gxpin = A5; // x-axis of the gyroscope
+const int gypin = A4; // y-axis of the gyroscope
+const int gzpin = A6; // z-axis of the gyroscope
 
 const int RAW_LEN = 9;
 const int BUF_LEN = 26;
