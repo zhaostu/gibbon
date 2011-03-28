@@ -19,45 +19,32 @@ COM = 'COM6'
 
 class Parameters(object):
     # Calibrated rest level.
-    SENSOR_ZERO_LEVEL = [505, 504, 507, 386, 384, 382, 0, 0, 0]
+    SENSOR_ZERO_LEVEL = [514, 509, 516, 386, 384, 382, 0, 0, 0]
     # Calibrated sensitivity. (Because the z-axis gyro is on a different chip, the
     # data for z-axis gyro is slightly different from the x/y-axis gyro.
-    SENSOR_SENSITIVITY = [102, 103, 102, 15.9142, 15.8326, 14.2891, 1300, 1300, 1300]
+    SENSOR_SENSITIVITY = [104, 105, 102, 15.9142, 15.8326, 14.2891, 1300, 1300, 1300]
 
     # This is the covariance matrix for the noise in the gyroscope,
     # represented by quaternions. Should be used as Q matrix in the EKalman.
-    # Static
-    GYRO_ERR_COV_S = np.matrix(
-        [[ 4.80574003e-01,  2.77505891e-03, -8.69992105e-04, -4.03247783e-04],
-         [ 2.77505891e-03,  9.19282667e-02,  5.28045224e-05, -2.45922986e-03],
-         [-8.69992105e-04,  5.28045224e-05,  8.54215839e-02,  5.30840124e-03],
-         [-4.03247783e-04, -2.45922986e-03,  5.30840124e-03,  6.06963705e-02]])
-
-    # Dynamic
-    GYRO_ERR_COV_D = np.matrix(
-        [[ 4.98022904e-01, -4.73826515e-04,  1.52772269e-04,  1.35944826e-03],
-         [-4.73826515e-04,  1.73284439e-01, -5.02642964e-03,  2.74398575e-02],
-         [ 1.52772269e-04, -5.02642964e-03,  1.59915122e-01,  7.54602092e-03],
-         [ 1.35944826e-03,  2.74398575e-02,  7.54602092e-03,  1.68741929e-01]])
+    GYRO_ERR_COV = np.matrix(
+        [[ 0.09617226, 0.00035709, 0.00120697, 0.00094805],
+         [ 0.00035709, 0.00563692, 0.00351737, 0.00295389],
+         [ 0.00120697, 0.00351737, 0.01479248, 0.00977058],
+         [ 0.00094805, 0.00295389, 0.00977058, 0.0132765 ]])
 
     # The covariance matrix for the noise in the accelerometer. Should be used
     # as R matrix in the EKalman.
-    # Static
-    ACC_ERR_COV_S = np.matrix(
-        [[ 2.08766874e-04,  3.23583653e-06, -4.37264738e-05],
-         [ 3.23583653e-06,  2.31599267e-04, -5.04887598e-05],
-         [-4.37264738e-05, -5.04887598e-05,  2.49027804e-04]])
+    ACC_ERR_COV = np.matrix(
+        [[ 1.25592175e-05,  5.02785656e-07, -1.48793605e-06],
+         [ 5.02785656e-07,  1.49101810e-05, -8.28079731e-06],
+         [-1.48793605e-06, -8.28079731e-06,  2.36853045e-05]])
 
-    # Dynamic
-    ACC_ERR_COV_D = np.matrix(
-        [[ 0.08552561, -0.00511642, -0.00672479],
-         [-0.00511642,  0.06799363, -0.00108495],
-         [-0.00672479, -0.00108495,  0.10689232]])
-
-    # The components of vector of the magnetic field, on the
-    # x axis and z axis.
-    MAG_X = 0.4375
-    MAG_Z = 0.75
+    # The covarance matrix for the noise in the magnetometer. Should be used
+    # as R matrix in the EKalman.
+    MAG_ERR_COV = np.matrix(
+        [[ 2.43683824e-03, -1.30620637e-03,  5.74294645e-05],
+         [-1.30620637e-03,  8.00758180e-04, -1.24840836e-04],
+         [ 5.74294645e-05, -1.24840836e-04,  1.08079276e-04]])
 
     @classmethod
     def acc_h(cls, x):
@@ -86,6 +73,11 @@ class Parameters(object):
         return np.matrix([[0, 0, -4*q[2], -4*q[3]],
                           [-2*q[3], 2*q[2], 2*q[1], -2*q[0]],
                           [2*q[2], 2*q[3], 2*q[0], 2*q[1]]])
+
+    # The components of vector of the magnetic field, on the
+    # x axis and z axis.
+    X = 0.4375
+    Z = 0.75
 
     @classmethod
     def mag_h_old(cls, x):
