@@ -9,7 +9,7 @@ from gibbon import *
 def main():
     pl = Plotter()
     db = Database(sys.argv[1])
-    data = db.read_data()
+    data = db.read_all_data()
     # Raw accelerometer data
     #pl.show_plot(data, 'time', ('raw_ax', 'raw_ay', 'raw_az'), title='Raw Accelerometer')
     # Normalized accelerometer data

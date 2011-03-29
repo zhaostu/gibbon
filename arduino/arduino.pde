@@ -112,6 +112,9 @@ void calibrateHMC5843(){
   scale_hmc5843[0] = 715.0 / raw[6];
   scale_hmc5843[1] = 715.0 / raw[7];
   scale_hmc5843[2] = 715.0 / raw[8];
+  raw[6] = 0;
+  raw[7] = 0;
+  raw[8] = 0;
 }
 
 void initHMC5843(){

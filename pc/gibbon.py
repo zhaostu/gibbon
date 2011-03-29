@@ -32,6 +32,13 @@ class Parameters(object):
          [ 0.00120697, 0.00351737, 0.01479248, 0.00977058],
          [ 0.00094805, 0.00295389, 0.00977058, 0.0132765 ]])
 
+    # Dynamic
+    GYRO_ERR_COV_D = np.matrix(
+        [[ 0.50547552,  0.00170386,  0.00103366,  0.00061697],
+         [ 0.00170386,  0.17675834, -0.03223344, -0.00790452],
+         [ 0.00103366, -0.03223344,  0.17435359, -0.01433586],
+         [ 0.00061697, -0.00790452, -0.01433586,  0.14327618]])
+
     # The covariance matrix for the noise in the accelerometer. Should be used
     # as R matrix in the EKalman.
     ACC_ERR_COV = np.matrix(
@@ -39,12 +46,24 @@ class Parameters(object):
          [ 5.02785656e-07,  1.49101810e-05, -8.28079731e-06],
          [-1.48793605e-06, -8.28079731e-06,  2.36853045e-05]])
 
+    # Dynamic
+    ACC_ERR_COV_D = np.matrix(
+        [[ 0.04902105, 0.00640971, 0.00189323],
+         [ 0.00640971, 0.03728613, 0.00115823],
+         [ 0.00189323, 0.00115823, 0.06454173]])
+
     # The covarance matrix for the noise in the magnetometer. Should be used
     # as R matrix in the EKalman.
     MAG_ERR_COV = np.matrix(
         [[ 2.43683824e-03, -1.30620637e-03,  5.74294645e-05],
          [-1.30620637e-03,  8.00758180e-04, -1.24840836e-04],
          [ 5.74294645e-05, -1.24840836e-04,  1.08079276e-04]])
+
+    # Dynamic
+    MAG_ERR_COV_D = np.matrix(
+        [[ 0.00211615, -0.00071693,  0.00028416],
+         [-0.00071693,  0.0038208 , -0.00086872],
+         [ 0.00028416, -0.00086872,  0.00254654]])
 
     @classmethod
     def acc_h(cls, x):
@@ -73,29 +92,6 @@ class Parameters(object):
         return np.matrix([[0, 0, -4*q[2], -4*q[3]],
                           [-2*q[3], 2*q[2], 2*q[1], -2*q[0]],
                           [2*q[2], 2*q[3], 2*q[0], 2*q[1]]])
-
-    # The components of vector of the magnetic field, on the
-    # x axis and z axis.
-    X = 0.4375
-    Z = 0.75
-
-    @classmethod
-    def mag_h_old(cls, x):
-        q = x.A
-        X = cls.MAG_X
-        Z = cls.MAG_Z
-        return np.matrix([[X-2*X*(q[2]*q[2]+q[3]*q[3]) + Z*2*(q[1]*q[3]-q[2]*q[0])],
-                          [X*2*(q[1]*q[2]-q[0]*q[3]) + Z*2*(q[2]*q[3]+q[1]*q[0])],
-                          [X*2*(q[1]*q[3]+q[0]*q[2]) + Z-2*Z*(q[1]*q[1]+q[2]*q[2])]])
-
-    @classmethod
-    def mag_H_old(cls, x):
-        q = x.A
-        X = cls.MAG_X
-        Z = cls.MAG_Z
-        return np.matrix([[-2*Z*q[2], 2*Z*q[3], -4*X*q[2]-2*Z*q[0], -4*X*q[3]+2*Z*q[1]],
-                          [2*(Z*q[1]-X*q[3]), 2*(X*q[2]+Z*q[0]), 2*(X*q[1]+Z*q[3]), 2*(Z*q[2]-X*q[0])],
-                          [2*X*q[2], 2*X*q[3]-4*Z*q[1], 2*X*q[0]-4*Z*q[2], 2*X*q[1]]])
 
 #################### Data processing ####################
 class SerialCom(object):
@@ -200,7 +196,7 @@ class Normalizer(object):
         data[8] = -data[8]
         return data
 
-    def get_h_mag(self, mag, gravity):
+    def get_horizontal_mag(self, mag, gravity):
         '''
         Get the horizontal projection of the magnetic field vector by removing
         component toward gravity.
@@ -258,12 +254,18 @@ class Database(object):
         para.extend(data)
         self.cur.execute(self.SQL_INSERT_DATA, para)
 
-    def read_data(self):
+    def read_all_data(self):
         '''
         Get all data from the database.
         '''
         self.cur.execute(self.SQL_SELECT_DATA)
         return self.cur.fetchall()
+
+    def read(self):
+        '''
+        Get next row from the database.
+        '''
+        return self.cur.fetchone()
 
     def __del__(self):
         if 'conn' in dir(self):
@@ -512,3 +514,90 @@ class Visualizer(object):
         self.z.pos = rm[2] * 0.05
         self.z.axis = rm[2]
         self.z.up = rm[0]
+
+class Demo(object):
+    def __init__(self, database=None, visualizer=True, fix_interval=1):
+        self.kalman = EKalman()
+        self.nm = Normalizer()
+
+        if database is not None:
+            # Read from database
+            db = Database(database)
+            self.data = db.read_all_data()
+            self.db_mode = True
+        else:
+            # Read from serial port
+            self.serial = SerialCom()
+            self.db_mode = False
+
+        self.vi_mode = bool(visualizer)
+        if self.vi_mode:
+            self.vi = Visualizer(self.kalman.quat)
+
+        self.fix_interval = fix_interval
+        self.reinit()
+
+    def reinit(self):
+        self.t = 0
+        self.mag_prev = (0, 0, 0)
+        self.mag_err_count = 0
+
+    def run(self):
+        if self.db_mode:
+            # Read from database.
+            for i, row in enumerate(self.data):
+                self._iteration(i,
+                                (row['gx'], row['gy'], row['gz']),
+                                (row['ax'], row['ay'], row['az']),
+                                (row['mx'], row['my'], row['mz']),
+                                row['time'])
+        else:
+            # Using serial port to read data.
+            i = 0
+            timeout = 0
+            while True:
+                (id, t, raw) = self.serial.read()
+                if raw is None:
+                    # timeout
+                    timeout += 1
+                    if timeout == 3:
+                        raise Exception('Serial connection timed out.')
+                else:
+                    data = self.nm.normalize(raw)
+                    self._iteration(i, data[3:6], data[:3], data[6:], t)
+                    i += 1
+
+    def _iteration(self, i, gyro, acc, mag, t):
+        if i % self.fix_interval == 0:
+            if np.linalg.norm(gyro) > 0.4:
+                GYRO_ERR_COV = Parameters.GYRO_ERR_COV_D
+                ACC_ERR_COV = Parameters.ACC_ERR_COV_D
+                MAG_ERR_COV = Parameters.MAG_ERR_COV_D
+            else:
+                GYRO_ERR_COV = Parameters.GYRO_ERR_COV
+                ACC_ERR_COV = Parameters.ACC_ERR_COV
+                MAG_ERR_COV = Parameters.MAG_ERR_COV
+
+            self.kalman.time_update(gyro, t / 1000000.0 - self.t,
+                               GYRO_ERR_COV)
+
+            rotation = self.kalman.x.RM.A
+            x_mag = self.nm.get_horizontal_mag(mag, rotation[2])
+
+            if self.mag_prev != mag and (np.dot(rotation[0], x_mag) >= 0 or self.mag_err_count > 2):
+                self.kalman.measurement_update(x_mag,
+                    MAG_ERR_COV, Parameters.mag_h, Parameters.mag_H)
+                self.mag_err_count = 0
+                self.mag_prev = mag
+            else:
+                self.kalman.measurement_update(acc,
+                    ACC_ERR_COV, Parameters.acc_h, Parameters.acc_H)
+                if np.dot(rotation[0], x_mag) < 0:
+                    self.mag_err_count += 1
+        else:
+            kalman.naive_time_update(gyro, t / 1000000.0 - self.t)
+        
+        self.t = t / 1000000.0
+        
+        if self.vi_mode:
+            self.vi.show(self.kalman.quat)

@@ -19,14 +19,16 @@ def main():
     axis = amap[sys.argv[2]]
     nm = Normalizer()
     
-    data = db.read_data()
+    data = db.read_all_data()
     t = 0
     total = 0
     for row in data:
-        total += nm.balance(row[3:9])[axis] * (row[2] / 1000000.0 - t)
-        t = row[2] / 1000000.0
+        total += nm.balance((row['raw_ax'], row['raw_ay'], row['raw_az'],
+                             row['raw_gx'], row['raw_gy'], row['raw_gz']
+                             row['raw_mx'], row['raw_my'], row['raw_mz']))[axis] * (row['time'] / 1000000.0 - t)
+        t = row['time'] / 1000000.0
 
-    print total        
+    print total
     
 if __name__ == '__main__':
     main()

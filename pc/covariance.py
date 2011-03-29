@@ -14,7 +14,7 @@ def main():
     
     for fname in sys.argv[1:]:
         db = Database(fname)
-        data = db.read_data()
+        data = db.read_all_data()
 
         acc_current = []
         gyro_current = []
