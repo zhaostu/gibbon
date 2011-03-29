@@ -387,7 +387,10 @@ class AccSequence(object):
     INF = float('nan')
     
     def __init__(self, array):
-        self.s = np.array(array)
+        self.s = []
+        for row in array:
+            self.s.append(np.array(row))
+
         for i in xrange(len(self.s)):
             for j in xrange(self.s[i]):
                 if self.s[i][j] >= 2:
@@ -398,6 +401,12 @@ class AccSequence(object):
                     self.s[i][j] = (self.s[i][j] - 1) / 2 + 1
                 elif self.s[i][j] <= -1:
                     self.s[i][j] = (self.s[i][j] + 1) / 2 - 1
+
+    def append(self, acc):
+        self.s.append(np.array(acc))
+
+    def pop(self):
+        del self.s[0]
 
     def dtw_distance(self, seq, w):
         dtw = np.empty(len(self.s)+1, len(seq.s)+1)
@@ -416,6 +425,9 @@ class AccSequence(object):
         return dtw[len(self.s)][len(seq.s)] * 1.0 / (len(self.s) + len(seq.s))
 
     def dist(self, a, b):
+        '''
+        The distance of two instant acceleration data.
+        '''
         return np.linalg.norm(a-b)
 
 class EKalman(object):
@@ -424,7 +436,7 @@ class EKalman(object):
     '''
     def __init__(self, array=[1, 0, 0, 0], Q=Parameters.GYRO_ERR_COV):
         self.x = Quaternion(array)
-        self.p = Q
+        self.p = Q * 100
 
     def unitize(self, data):
         v = np.array(data)
@@ -489,7 +501,7 @@ class Plotter(object):
         plt.show()
 
 class Visualizer(object):
-    def __init__(self, quat):
+    def __init__(self):
         # For converting
         self.rt_mx = np.matrix([[1, 0, 0],
                                 [0, 0, 1],
@@ -498,7 +510,6 @@ class Visualizer(object):
         self.x = visual.arrow(color=(1,0,0))
         self.y = visual.arrow(color=(0,1,0))
         self.z = visual.arrow(color=(0,0,1))
-        self.show(quat)
 
     def _cnvrt_axis(self, rm):
         return self.rt_mx * rm
@@ -517,9 +528,6 @@ class Visualizer(object):
 
 class Demo(object):
     def __init__(self, database=None, visualizer=True, fix_interval=1):
-        self.kalman = EKalman()
-        self.nm = Normalizer()
-
         if database is not None:
             # Read from database
             db = Database(database)
@@ -530,9 +538,12 @@ class Demo(object):
             self.serial = SerialCom()
             self.db_mode = False
 
+        self.kalman = EKalman()
+        self.nm = Normalizer()
+
         self.vi_mode = bool(visualizer)
         if self.vi_mode:
-            self.vi = Visualizer(self.kalman.quat)
+            self.vi = Visualizer()
 
         self.fix_interval = fix_interval
         self.reinit()
@@ -551,6 +562,7 @@ class Demo(object):
                                 (row['ax'], row['ay'], row['az']),
                                 (row['mx'], row['my'], row['mz']),
                                 row['time'])
+                time.sleep(0.001)
         else:
             # Using serial port to read data.
             i = 0
@@ -584,16 +596,20 @@ class Demo(object):
             rotation = self.kalman.x.RM.A
             x_mag = self.nm.get_horizontal_mag(mag, rotation[2])
 
-            if self.mag_prev != mag and (np.dot(rotation[0], x_mag) >= 0 or self.mag_err_count > 2):
+            if self.mag_prev != mag and (np.dot(rotation[0], x_mag) >= 0 or\
+                    self.mag_err_count > 2):
                 self.kalman.measurement_update(x_mag,
                     MAG_ERR_COV, Parameters.mag_h, Parameters.mag_H)
+                
                 self.mag_err_count = 0
                 self.mag_prev = mag
             else:
                 self.kalman.measurement_update(acc,
                     ACC_ERR_COV, Parameters.acc_h, Parameters.acc_H)
-                if np.dot(rotation[0], x_mag) < 0:
+                if self.mag_prev != mag:
                     self.mag_err_count += 1
+                    self.mag_prev == mag
+
         else:
             kalman.naive_time_update(gyro, t / 1000000.0 - self.t)
         
