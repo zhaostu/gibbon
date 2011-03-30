@@ -4,11 +4,12 @@
 #############################
 
 import struct
-import serial
 import time
+import math
 import sqlite3
+
+import serial
 import numpy as np
-import scipy
 from matplotlib import pyplot as plt
 import visual
 
@@ -300,11 +301,8 @@ class Quaternion(object):
 
     @classmethod
     def from_gyro(cls, gyro, dt):
-        theta = 0
-        for a in gyro:
-            theta += a * a
-        
-        theta = np.sqrt(theta)
+        theta = norm3(gyro)
+
         if theta == 0:
             v = (1, 0, 0)
         else:
@@ -381,54 +379,49 @@ class Quaternion(object):
         return Quaternion(a)
 
     def unitize(self):
-        self.q = self.q / np.linalg.norm(self.q)
+        self.q = self.q / norm4(self.q)
 
-class AccSequence(object):
-    INF = float('nan')
+class Gesture(object):
+    INF = 32767.0
     
-    def __init__(self, array):
+    def __init__(self, array=[]):
         self.s = []
         for row in array:
             self.s.append(np.array(row))
 
-        for i in xrange(len(self.s)):
-            for j in xrange(self.s[i]):
-                if self.s[i][j] >= 2:
-                    self.s[i][j] = 1.6
-                elif self.s[i][j] <= -2:
-                    self.s[i][j] = -1.6
-                elif self.s[i][j] >= 1:
-                    self.s[i][j] = (self.s[i][j] - 1) / 2 + 1
-                elif self.s[i][j] <= -1:
-                    self.s[i][j] = (self.s[i][j] + 1) / 2 - 1
+    def __len__(self):
+        return len(self.s)
 
     def append(self, acc):
         self.s.append(np.array(acc))
+
+        for j in xrange(len(self.s[-1])):
+            if self.s[-1][j] >= 2:
+                self.s[-1][j] = 1.6
+            elif self.s[-1][j] <= -2:
+                self.s[-1][j] = -1.6
+            elif self.s[-1][j] >= 1:
+                self.s[-1][j] = (self.s[-1][j] - 1) / 2 + 1
+            elif self.s[-1][j] <= -1:
+                self.s[-1][j] = (self.s[-1][j] + 1) / 2 - 1
 
     def pop(self):
         del self.s[0]
 
     def dtw_distance(self, seq, w):
-        dtw = np.empty(len(self.s)+1, len(seq.s)+1)
-        for i in xrange(len(self.s) + 1):
-            dtw[i][0] = self.INF
+        len_a = len(self.s)
+        len_b = len(seq.s)
+        dtw = np.empty((len_a+1, len_b+1))
 
-        for i in xrange(len(seq.s) + 1):
-            dtw[0][i] = self.INF
+        dtw.fill(self.INF)
 
         dtw[0][0] = 0
-        for i in xrange(len(self.s)):
-            for j in xrange(max(0, i-w), min(len(seq.s), i+w)):
-                dtw[i+1][j+1] = self.dist(self.s[i], seq.s[j]) +\
-                    np.nanmin(dtw[i][j+1], dtw[i][j], dtw[i+1][j])
+        for i in xrange(len_a):
+            for j in xrange(max(0, i-w), min(len_b, i+w)):
+                dtw[i+1][j+1] = norm3(self.s[i]-seq.s[j]) +\
+                    min(dtw[i][j+1], dtw[i][j], dtw[i+1][j])
 
-        return dtw[len(self.s)][len(seq.s)] * 1.0 / (len(self.s) + len(seq.s))
-
-    def dist(self, a, b):
-        '''
-        The distance of two instant acceleration data.
-        '''
-        return np.linalg.norm(a-b)
+        return dtw[len_a][len_b] * 1.0 / (len_a + len_b)
 
 class EKalman(object):
     '''
@@ -440,7 +433,7 @@ class EKalman(object):
 
     def unitize(self, data):
         v = np.array(data)
-        return v / np.linalg.norm(v)
+        return v / norm3(v)
 
     def naive_time_update(self, gyro, dt):
         q = Quaternion.from_gyro(gyro, dt)
@@ -526,6 +519,8 @@ class Visualizer(object):
         self.z.axis = rm[2]
         self.z.up = rm[0]
 
+#################### Demo ####################
+
 class Demo(object):
     def __init__(self, database=None, visualizer=True, fix_interval=1):
         if database is not None:
@@ -545,6 +540,7 @@ class Demo(object):
         if self.vi_mode:
             self.vi = Visualizer()
 
+        self.call_back = None
         self.fix_interval = fix_interval
         self.reinit()
 
@@ -562,6 +558,10 @@ class Demo(object):
                                 (row['ax'], row['ay'], row['az']),
                                 (row['mx'], row['my'], row['mz']),
                                 row['time'])
+                if self.call_back:
+                    self.call_back(i, (row['gx'], row['gy'], row['gz']),
+                                   (row['ax'], row['ay'], row['az']), (row['mx'], row['my'], row['mz']),
+                                   row['time'], self.kalman.quat.RM.T.A[0])
                 time.sleep(0.001)
         else:
             # Using serial port to read data.
@@ -577,11 +577,13 @@ class Demo(object):
                 else:
                     data = self.nm.normalize(raw)
                     self._iteration(i, data[3:6], data[:3], data[6:], t)
+                    if self.call_back:
+                        self.call_back(i, data[3:6], data[:3], data[6:], t, self.kalman.quat.RM.T.A[0])
                     i += 1
 
     def _iteration(self, i, gyro, acc, mag, t):
         if i % self.fix_interval == 0:
-            if np.linalg.norm(gyro) > 0.4:
+            if norm3(gyro) > 0.4:
                 GYRO_ERR_COV = Parameters.GYRO_ERR_COV_D
                 ACC_ERR_COV = Parameters.ACC_ERR_COV_D
                 MAG_ERR_COV = Parameters.MAG_ERR_COV_D
@@ -617,3 +619,11 @@ class Demo(object):
         
         if self.vi_mode:
             self.vi.show(self.kalman.quat)
+
+    def register(self, call_back):
+        self.call_back = call_back
+
+def norm3(a):
+    return math.sqrt(a[0]*a[0] + a[1]*a[1] + a[2]*a[2])
+def norm4(a):
+    return math.sqrt(a[0]*a[0] + a[1]*a[1] + a[2]*a[2] + a[3]*a[3])
