@@ -623,7 +623,9 @@ class Demo(object):
     def register(self, call_back):
         self.call_back = call_back
 
+
 def norm3(a):
     return math.sqrt(a[0]*a[0] + a[1]*a[1] + a[2]*a[2])
+
 def norm4(a):
     return math.sqrt(a[0]*a[0] + a[1]*a[1] + a[2]*a[2] + a[3]*a[3])
