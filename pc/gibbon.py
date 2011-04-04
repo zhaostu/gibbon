@@ -27,13 +27,13 @@ class Parameters(object):
 
     # This is the covariance matrix for the noise in the gyroscope,
     # represented by quaternions. Should be used as Q matrix in the EKalman.
-    GYRO_ERR_COV = np.matrix(
+    GYRO_ERR_COV_S = np.matrix(
         [[ 0.09617226, 0.00035709, 0.00120697, 0.00094805],
          [ 0.00035709, 0.00563692, 0.00351737, 0.00295389],
          [ 0.00120697, 0.00351737, 0.01479248, 0.00977058],
          [ 0.00094805, 0.00295389, 0.00977058, 0.0132765 ]])
 
-    GYRO_ERR_COV_001 = GYRO_ERR_COV / 100
+    GYRO_ERR_COV_S_S = GYRO_ERR_COV_S / 50
 
     # Dynamic
     GYRO_ERR_COV_D = np.matrix(
@@ -44,7 +44,7 @@ class Parameters(object):
 
     # The covariance matrix for the noise in the accelerometer. Should be used
     # as R matrix in the EKalman.
-    ACC_ERR_COV = np.matrix(
+    ACC_ERR_COV_S = np.matrix(
         [[ 1.25592175e-05,  5.02785656e-07, -1.48793605e-06],
          [ 5.02785656e-07,  1.49101810e-05, -8.28079731e-06],
          [-1.48793605e-06, -8.28079731e-06,  2.36853045e-05]])
@@ -55,11 +55,11 @@ class Parameters(object):
          [ 0.00640971, 0.03728613, 0.00115823],
          [ 0.00189323, 0.00115823, 0.06454173]])
 
-    ACC_ERR_COV_D_100 = ACC_ERR_COV_D * 100
+    ACC_ERR_COV_D_L = ACC_ERR_COV_D * 50
 
     # The covarance matrix for the noise in the magnetometer. Should be used
     # as R matrix in the EKalman.
-    MAG_ERR_COV = np.matrix(
+    MAG_ERR_COV_S = np.matrix(
         [[ 2.43683824e-03, -1.30620637e-03,  5.74294645e-05],
          [-1.30620637e-03,  8.00758180e-04, -1.24840836e-04],
          [ 5.74294645e-05, -1.24840836e-04,  1.08079276e-04]])
@@ -70,7 +70,7 @@ class Parameters(object):
          [-0.00071693,  0.0038208 , -0.00086872],
          [ 0.00028416, -0.00086872,  0.00254654]])
 
-    MAG_ERR_COV_D_100 = MAG_ERR_COV_D * 100
+    MAG_ERR_COV_D_L = MAG_ERR_COV_D * 50
 
     @classmethod
     def acc_h(cls, x):
@@ -203,7 +203,7 @@ class Normalizer(object):
         data[8] = -data[8]
         return data
 
-    def get_horizontal_mag(self, mag, gravity):
+    def get_x_mag(self, mag, gravity):
         '''
         Get the horizontal projection of the magnetic field vector by removing
         component toward gravity.
@@ -389,17 +389,34 @@ class Quaternion(object):
 
 class Gesture(object):
     INF = 32767.0
-    
+    STATIC_THRESHOLD = 0.40
+
+    @classmethod
+    def from_db(cls, db, sample_interval=0.05):
+        gesture = cls()
+        prev_sample_t = 0
+
+        data = db.read_all_data()
+
+        for row in data:
+            t = row['time'] * 0.000001
+            if t - prev_sample_t < sample_interval:
+                continue
+            prev_sample_t = t
+            gesture.append((row['gx'], row['gy'], row['gz']))
+
+        gesture.trim_head()
+        gesture.trim_tail()
+        return gesture
+
     def __init__(self, array=[]):
-        self.s = []
-        for row in array:
-            self.s.append(np.array(row))
+        self.s = [np.array(row) for row in array]
 
     def __len__(self):
         return len(self.s)
 
-    def append(self, acc):
-        self.s.append(np.array(acc))
+    def append(self, data):
+        self.s.append(np.array(data))
 
         for j in xrange(len(self.s[-1])):
             if self.s[-1][j] >= 2:
@@ -411,8 +428,24 @@ class Gesture(object):
             elif self.s[-1][j] <= -1:
                 self.s[-1][j] = (self.s[-1][j] + 1) / 2 - 1
 
-    def pop(self):
-        del self.s[0]
+    @property
+    def copy(self):
+        return Gesture(self.s)
+
+    def pop_head(self):
+        if len(self.s) > 0:
+            del self.s[0]
+        return self
+
+    def trim_head(self):
+        while len(self.s) > 0 and norm3(self.s[0]) <= self.STATIC_THRESHOLD:
+            del self.s[0]
+        return self
+
+    def trim_tail(self):
+        while len(self.s) > 0 and norm3(self.s[-1]) <= self.STATIC_THRESHOLD:
+            self.s.pop()
+        return self
 
     def dtw_distance(self, seq, w):
         len_a = len(self.s)
@@ -433,9 +466,9 @@ class EKalman(object):
     '''
     The Kalman Filter class for the IMU.
     '''
-    def __init__(self, array=[1, 0, 0, 0], Q=Parameters.GYRO_ERR_COV):
+    def __init__(self, array=[1, 0, 0, 0], Q=Parameters.GYRO_ERR_COV_D):
         self.x = Quaternion(array)
-        self.p = Q * 100
+        self.p = Q
 
     def unitize(self, data):
         v = np.array(data)

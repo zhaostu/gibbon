@@ -8,57 +8,56 @@ import sys
 
 from gibbon import *
 
-gesture = Gesture()
-ud = Gesture()
-
-gesture_mode = False
-prev_x = None
-sum_x = None
-num = 0
-
 class Demo(object):
-    def __init__(self, database=None, visualizer=True):
+    def __init__(self, database=None, gesture=None, visualizer=True,
+                 gesture_sample_interval = 0.05):
         if database is not None:
             # Read from database
-            db = Database(database)
-            self.data = db.read_all_data()
+            self.data = database.read_all_data()
             self.db_mode = True
         else:
             # Read from serial port
             self.serial = SerialCom(mode=1)
             self.db_mode = False
 
-        self.kalman = EKalman()
-        self.nm = Normalizer()
-
         self.vi_mode = bool(visualizer)
         if self.vi_mode:
             self.vi = Visualizer()
 
-        self.call_back = None
-        self.reinit()
+        self.nm = Normalizer()
 
-    def reinit(self):
         self.t = 0
+
+        # EKalman.
+        self.kalman = EKalman(Q=Parameters.GYRO_ERR_COV_D * 1000)
         self.mag_prev = (0, 0, 0)
+
+        # Gesture
+        if gesture is None:
+            self.gesture_mode = False
+        else:
+            self.gesture_mode = True
+            self.gesture = gesture
+            self.gyro_seq = Gesture()
+
+            self.gesture_sample_interval = gesture_sample_interval
+            self.prev_sample_t = 0
+
+            self.pointing_started = None
+            self.start_x = None
+            self.sum_x = None
+            self.num_x = 0
 
     def run(self):
         if self.db_mode:
             # Read from database.
-            for i, row in enumerate(self.data):
-                self._iteration(i,
-                                (row['gx'], row['gy'], row['gz']),
+            for row in self.data:
+                self.iteration((row['gx'], row['gy'], row['gz']),
                                 (row['ax'], row['ay'], row['az']),
                                 (row['mx'], row['my'], row['mz']),
                                 row['time'])
-                if self.call_back:
-                    self.call_back(i, (row['gx'], row['gy'], row['gz']),
-                                   (row['ax'], row['ay'], row['az']), (row['mx'], row['my'], row['mz']),
-                                   row['time'], self.kalman.quat.RM.T.A[0])
-                time.sleep(0.001)
         else:
             # Using serial port to read data.
-            i = 0
             timeout = 0
             while True:
                 (id, t, raw) = self.serial.read()
@@ -69,27 +68,43 @@ class Demo(object):
                         raise Exception('Serial connection timed out.')
                 else:
                     data = self.nm.normalize(raw)
-                    self._iteration(i, data[3:6], data[:3], data[6:], t)
-                    if self.call_back:
-                        self.call_back(i, data[3:6], data[:3], data[6:], t, self.kalman.quat.RM.T.A[0])
-                    i += 1
+                    self.iteration(data[3:6], data[:3], data[6:], t)
 
-    def _iteration(self, i, gyro, acc, mag, t):
-        GYRO_ERR_COV = Parameters.GYRO_ERR_COV_001
+    def iteration(self, gyro, acc, mag, t):
+        t = t * 0.000001
+        self.kalman_iter(gyro, acc, mag, t)
+        if self.gesture_mode:
+            self.gesture_iter(gyro, acc, mag, t)
+
+        if self.vi_mode:
+            self.vi.show(self.kalman.quat)
+
+        self.t = t
+
+    def kalman_iter(self, gyro, acc, mag, t):
+        if t <= 1.5:
+            GYRO_ERR_COV = Parameters.GYRO_ERR_COV_D
+        else:
+            GYRO_ERR_COV = Parameters.GYRO_ERR_COV_S_S
 
         total_acc = norm3(acc)
-        if total_acc > 1.1 or total_acc < 0.9 or norm3(gyro) > 0.4:
-            ACC_ERR_COV = Parameters.ACC_ERR_COV_D_100
+        total_gyro = norm3(gyro)
+        if total_acc > 1.1 or total_acc < 0.9 or total_gyro > 0.4:
+            ACC_ERR_COV = Parameters.ACC_ERR_COV_D_L
         else:
             ACC_ERR_COV = Parameters.ACC_ERR_COV_D
 
-        MAG_ERR_COV = Parameters.MAG_ERR_COV_D_100
+        if gyro < 0.2:
+            MAG_ERR_COV = Parameters.MAG_ERR_COV_D
+        else:
+            MAG_ERR_COV = Parameters.MAG_ERR_COV_D_L
 
-        self.kalman.time_update(gyro, t / 1000000.0 - self.t,
+        self.kalman.time_update(gyro, t - self.t,
                           GYRO_ERR_COV)
 
-        rotation = self.kalman.x.RM.A
-        x_mag = self.nm.get_horizontal_mag(mag, rotation[2])
+        rotation = self.kalman.xminus.RM.A
+        # Get only the x axis of the magnetic field.
+        x_mag = self.nm.get_x_mag(mag, rotation[2])
 
         if self.mag_prev != mag:
             self.kalman.measurement_update(x_mag,
@@ -99,78 +114,68 @@ class Demo(object):
         else:
             self.kalman.measurement_update(acc,
                 ACC_ERR_COV, Parameters.acc_h, Parameters.acc_H)
-        
-        self.t = t / 1000000.0
-        
-        if self.vi_mode:
-            self.vi.show(self.kalman.quat)
 
-    def register(self, call_back):
-        self.call_back = call_back
+    def gesture_iter(self, gyro, acc, mag, t):
+        if t - self.prev_sample_t >= self.gesture_sample_interval:
+            self.gyro_seq.append(gyro)
+            self.gyro_seq.trim_head()
+            self.prev_sample_t = t
+
+            if len(self.gyro_seq) > len(self.gesture) * 1.5:
+                self.gyro_seq.pop_head()
+
+            if self.pointing_started is None:
+                score = self.gesture.dtw_distance(self.gyro_seq.copy.trim_tail(), 10)
+                if score < 0.5:
+                    print 'Pointing gesture detected.', score, t
+                    self.pointing_started = t
+
+        if self.pointing_started is not None:
+            # Pointing started
+
+            if t - self.pointing_started >= 2:
+                # Already pointed for two seconds.
+                print self.sum_x / self.num_x
+                self.pointing_started = None
+                self.start_x = None
+                self.sum_x = None
+                self.num_x = 0
+
+            elif norm3(gyro) < Gesture.STATIC_THRESHOLD:
+                # Stable
+                x = self.kalman.quat.RM.T.A[0]
+                if self.start_x is None or norm3(self.start_x - x) >= 0.15:
+                    self.pointing_started = t
+                    self.start_x = np.array(x)
+                    self.sum_x = x
+                    self.num_x = 1
+                else:
+                    self.sum_x += x
+                    self.num_x += 1
+            else:
+                self.pointing_started = t
+                self.start_x = None
+                self.sum_x = None
+                self.num_x = 0
 
 def main():
-    db = Database('point.gib')
-    ud_data = db.read_all_data()
-
-    for i, row in enumerate(ud_data):
-        if row['time'] >= 0.7 * 1000000 and row['time'] <= 1.4 * 1000000 and i % 15 == 0:
-            ud.append((row['gx'], row['gy'], row['gz']))
-    
+    si = 0.05
     if len(sys.argv) > 1:
-        db = sys.argv[1]
+        db = Database(sys.argv[1])
     else:
         db = None
+
+    point_db = Database('point.gib')
+    point = Gesture.from_db(point_db, sample_interval=si)
+
     try:
-        demo = Demo(database=db, visualizer=True)
-        #demo.register(iteration)
+        demo = Demo(database=db, gesture=point, visualizer=True,
+                    gesture_sample_interval = si)
         print 'Started...'
         demo.run()
     except (KeyboardInterrupt, Exception), e:
         traceback.print_exc()
 
-def iteration(i, gyro, acc, mag, t, x):
-    global gesture_mode, prev_x, sum_x, num
-    if i % 15 == 0:
-        gesture.append(gyro)
-        if len(gesture) > len(ud):
-            gesture.pop()
-
-    if not gesture_mode:
-        if i % 15 == 0:
-            x = ud.dtw_distance(gesture, 5)
-            if x < 0.6:
-                print 'Pointing gesture detected.'
-                print x, t
-                gesture_mode = True
-    else:
-        if norm3(gyro) < 0.30:
-            # Stable
-            if prev_x is None:
-                prev_x = x
-                sum_x = x
-                num = 1
-            else:
-                if norm3(prev_x - x) < 0.15:
-                    sum_x += x
-                    prev_x = x
-                    num += 1
-                else:
-                    sum_x = x
-                    prev_x = x
-                    num = 1
-
-        elif prev_x is not None:
-            if num < 100:
-                # Clear
-                sum_x = None
-                prev_x = None
-                num = 0
-            else:
-                print sum_x / num
-                gesture_mode = False
-                sum_x = None
-                prev_x = None
-                num = 0
 
 if __name__ == '__main__':
     main()
