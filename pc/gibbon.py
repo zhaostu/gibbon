@@ -33,6 +33,8 @@ class Parameters(object):
          [ 0.00120697, 0.00351737, 0.01479248, 0.00977058],
          [ 0.00094805, 0.00295389, 0.00977058, 0.0132765 ]])
 
+    GYRO_ERR_COV_001 = GYRO_ERR_COV / 100
+
     # Dynamic
     GYRO_ERR_COV_D = np.matrix(
         [[ 0.50547552,  0.00170386,  0.00103366,  0.00061697],
@@ -53,6 +55,8 @@ class Parameters(object):
          [ 0.00640971, 0.03728613, 0.00115823],
          [ 0.00189323, 0.00115823, 0.06454173]])
 
+    ACC_ERR_COV_D_100 = ACC_ERR_COV_D * 100
+
     # The covarance matrix for the noise in the magnetometer. Should be used
     # as R matrix in the EKalman.
     MAG_ERR_COV = np.matrix(
@@ -66,30 +70,32 @@ class Parameters(object):
          [-0.00071693,  0.0038208 , -0.00086872],
          [ 0.00028416, -0.00086872,  0.00254654]])
 
+    MAG_ERR_COV_D_100 = MAG_ERR_COV_D * 100
+
     @classmethod
     def acc_h(cls, x):
-        q = x.A
+        q = x.A1
         return np.matrix([[2*(q[1]*q[3]-q[2]*q[0])],
                           [2*(q[2]*q[3]+q[1]*q[0])],
                           [1-2*(q[1]*q[1]+q[2]*q[2])]])
 
     @classmethod
     def acc_H(cls, x):
-        q = x.A
+        q = x.A1
         return np.matrix([[-2*q[2], 2*q[3], -2*q[0], 2*q[1]],
                           [2*q[1], 2*q[0], 2*q[3], 2*q[2]],
                           [0, -4*q[1], -4*q[2], 0]])
 
     @classmethod
     def mag_h(cls, x):
-        q = x.A
+        q = x.A1
         return np.matrix([[1-2*(q[2]*q[2]+q[3]*q[3])],
                           [2*(q[1]*q[2]-q[0]*q[3])],
                           [2*(q[1]*q[3]+q[0]*q[2])]])
 
     @classmethod
     def mag_H(cls, x):
-        q = x.A
+        q = x.A1
         return np.matrix([[0, 0, -4*q[2], -4*q[3]],
                           [-2*q[3], 2*q[2], 2*q[1], -2*q[0]],
                           [2*q[2], 2*q[3], 2*q[0], 2*q[1]]])
@@ -448,9 +454,9 @@ class EKalman(object):
         # q1 * q2 means apply q2 first about XYZ,
         # then apply q1 about XYZ, which is equavalent to
         # apply q1 first about XYZ, then q2 about xyz.
-
         self.xminus = self.x * q
-        A = q.matrix_repr
+        # q1 * q2 = q1.matrix_repr * q2 = q2.neg_matrix_repr * q1
+        A = q.neg_matrix_repr
         self.pminus = A * self.p * A.T + Q
 
     def measurement_update(self, data, R, h_func, H_func):
@@ -460,10 +466,10 @@ class EKalman(object):
         I = np.identity(4)
         z = np.matrix(self.unitize(data)).T
 
-        H = H_func(self.xminus)
+        H = H_func(self.xminus.M)
 
         K = self.pminus * H.T * (H * self.pminus * H.T + R).I
-        self.x = Quaternion(self.xminus.M + K * (z - h_func(self.xminus)))
+        self.x = Quaternion(self.xminus.M + K * (z - h_func(self.xminus.M)))
         self.p = (I - K * H) * self.pminus
     
     @property
@@ -519,110 +525,7 @@ class Visualizer(object):
         self.z.axis = rm[2]
         self.z.up = rm[0]
 
-#################### Demo ####################
-
-class Demo(object):
-    def __init__(self, database=None, visualizer=True, fix_interval=1):
-        if database is not None:
-            # Read from database
-            db = Database(database)
-            self.data = db.read_all_data()
-            self.db_mode = True
-        else:
-            # Read from serial port
-            self.serial = SerialCom()
-            self.db_mode = False
-
-        self.kalman = EKalman()
-        self.nm = Normalizer()
-
-        self.vi_mode = bool(visualizer)
-        if self.vi_mode:
-            self.vi = Visualizer()
-
-        self.call_back = None
-        self.fix_interval = fix_interval
-        self.reinit()
-
-    def reinit(self):
-        self.t = 0
-        self.mag_prev = (0, 0, 0)
-        self.mag_err_count = 0
-
-    def run(self):
-        if self.db_mode:
-            # Read from database.
-            for i, row in enumerate(self.data):
-                self._iteration(i,
-                                (row['gx'], row['gy'], row['gz']),
-                                (row['ax'], row['ay'], row['az']),
-                                (row['mx'], row['my'], row['mz']),
-                                row['time'])
-                if self.call_back:
-                    self.call_back(i, (row['gx'], row['gy'], row['gz']),
-                                   (row['ax'], row['ay'], row['az']), (row['mx'], row['my'], row['mz']),
-                                   row['time'], self.kalman.quat.RM.T.A[0])
-                time.sleep(0.001)
-        else:
-            # Using serial port to read data.
-            i = 0
-            timeout = 0
-            while True:
-                (id, t, raw) = self.serial.read()
-                if raw is None:
-                    # timeout
-                    timeout += 1
-                    if timeout == 3:
-                        raise Exception('Serial connection timed out.')
-                else:
-                    data = self.nm.normalize(raw)
-                    self._iteration(i, data[3:6], data[:3], data[6:], t)
-                    if self.call_back:
-                        self.call_back(i, data[3:6], data[:3], data[6:], t, self.kalman.quat.RM.T.A[0])
-                    i += 1
-
-    def _iteration(self, i, gyro, acc, mag, t):
-        if i % self.fix_interval == 0:
-            if norm3(gyro) > 0.4:
-                GYRO_ERR_COV = Parameters.GYRO_ERR_COV_D
-                ACC_ERR_COV = Parameters.ACC_ERR_COV_D
-                MAG_ERR_COV = Parameters.MAG_ERR_COV_D
-            else:
-                GYRO_ERR_COV = Parameters.GYRO_ERR_COV
-                ACC_ERR_COV = Parameters.ACC_ERR_COV
-                MAG_ERR_COV = Parameters.MAG_ERR_COV
-
-            self.kalman.time_update(gyro, t / 1000000.0 - self.t,
-                               GYRO_ERR_COV)
-
-            rotation = self.kalman.x.RM.A
-            x_mag = self.nm.get_horizontal_mag(mag, rotation[2])
-
-            if self.mag_prev != mag and (np.dot(rotation[0], x_mag) >= 0 or\
-                    self.mag_err_count > 2):
-                self.kalman.measurement_update(x_mag,
-                    MAG_ERR_COV, Parameters.mag_h, Parameters.mag_H)
-                
-                self.mag_err_count = 0
-                self.mag_prev = mag
-            else:
-                self.kalman.measurement_update(acc,
-                    ACC_ERR_COV, Parameters.acc_h, Parameters.acc_H)
-                if self.mag_prev != mag:
-                    self.mag_err_count += 1
-                    self.mag_prev == mag
-
-        else:
-            kalman.naive_time_update(gyro, t / 1000000.0 - self.t)
-        
-        self.t = t / 1000000.0
-        
-        if self.vi_mode:
-            self.vi.show(self.kalman.quat)
-
-    def register(self, call_back):
-        self.call_back = call_back
-
+#################### Utils ####################
 
 def norm3(a):
     return math.sqrt(a[0]*a[0] + a[1]*a[1] + a[2]*a[2])

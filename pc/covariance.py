@@ -24,7 +24,7 @@ def main():
 
         for row in data:
             acc_current.append((row['ax'], row['ay'], row['az']))
-            q = Quaternion.from_gyro((row['gx'], row['gy'], row['gz']), row[2])
+            q = Quaternion.from_gyro((row['gx'], row['gy'], row['gz']), row['time'])
             gyro_current.append(q.A)
 
             m = (row['mx'], row['my'], row['mz'])
