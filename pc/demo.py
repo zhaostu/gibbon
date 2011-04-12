@@ -9,16 +9,17 @@ import sys
 from gibbon import *
 
 class Demo(object):
-    def __init__(self, database=None, gesture=None, visualizer=True,
+    def __init__(self, database=None, gesture=None, visualizer=True, record_db=None,
                  gesture_sample_interval = 0.05):
         if database is not None:
             # Read from database
             self.data = database.read_all_data()
             self.db_mode = True
         else:
-            # Read from serial port
+            # Read from serial port and write to database.
             self.serial = SerialCom(mode=1)
             self.db_mode = False
+            self.record_db = record_db
 
         self.vi_mode = bool(visualizer)
         if self.vi_mode:
@@ -69,6 +70,8 @@ class Demo(object):
                 else:
                     data = self.nm.normalize(raw)
                     self.iteration(data[3:6], data[:3], data[6:], t)
+                    if self.record_db is not None:
+                        self.record_db.write_data(id, t, raw, data)
 
     def iteration(self, gyro, acc, mag, t):
         t = t * 0.000001
@@ -127,25 +130,28 @@ class Demo(object):
             if self.pointing_started is None:
                 score = self.gesture.dtw_distance(self.gyro_seq.copy.trim_tail(), 10)
                 if score < 0.5:
-                    print 'Pointing gesture detected.', score, t
+                    print 'Pointing gesture detected.', score, t, chr(7)
                     self.pointing_started = t
 
         if self.pointing_started is not None:
             # Pointing started
 
-            if t - self.pointing_started >= 2:
+            if t - self.pointing_started >= 5:
                 # Already pointed for two seconds.
-                print self.sum_x / self.num_x
+                print self.sum_x / self.num_x, chr(7), chr(7)
                 self.pointing_started = None
                 self.start_x = None
                 self.sum_x = None
                 self.num_x = 0
+            elif t - self.pointing_started < 3:
+                # Give 3 seconds of preparation time.
+                pass
 
             elif norm3(gyro) < Gesture.STATIC_THRESHOLD:
                 # Stable
                 x = self.kalman.quat.RM.T.A[0]
                 if self.start_x is None or norm3(self.start_x - x) >= 0.15:
-                    self.pointing_started = t
+                    self.pointing_started = t - 3
                     self.start_x = np.array(x)
                     self.sum_x = x
                     self.num_x = 1
@@ -153,7 +159,7 @@ class Demo(object):
                     self.sum_x += x
                     self.num_x += 1
             else:
-                self.pointing_started = t
+                self.pointing_started = t - 3
                 self.start_x = None
                 self.sum_x = None
                 self.num_x = 0
@@ -162,18 +168,24 @@ def main():
     si = 0.05
     if len(sys.argv) > 1:
         db = Database(sys.argv[1])
+        record_db = None
     else:
         db = None
+        record_db = Database()
 
     point_db = Database('point.gib')
     point = Gesture.from_db(point_db, sample_interval=si)
 
     try:
-        demo = Demo(database=db, gesture=point, visualizer=True,
+        demo = Demo(database=db, gesture=point, visualizer=True, record_db=record_db,
                     gesture_sample_interval = si)
         print 'Started...'
         demo.run()
-    except (KeyboardInterrupt, Exception), e:
+    except KeyboardInterrupt, e:
+        if record_db is not None:
+            print 'Data recorded in %s.' % record_db.filename
+            del record_db
+    except Exception, e:
         traceback.print_exc()
 
 
