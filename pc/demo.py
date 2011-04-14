@@ -129,7 +129,7 @@ class Demo(object):
 
             if self.pointing_started is None:
                 score = self.gesture.dtw_distance(self.gyro_seq.copy.trim_tail(), 10)
-                if score < 0.5:
+                if score < 0.53:
                     print 'Pointing gesture detected.', score, t, chr(7)
                     self.pointing_started = t
 
