@@ -181,7 +181,7 @@ def main():
                     gesture_sample_interval = si)
         print 'Started...'
         demo.run()
-    except KeyboardInterrupt, e:
+    except KeyboardInterrupt as e:
         if record_db is not None:
             print 'Data recorded in %s.' % record_db.filename
             del record_db

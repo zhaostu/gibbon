@@ -7,8 +7,13 @@ import struct
 import time
 import math
 import sqlite3
+import sys
 
-import serial
+try:
+    import serial
+except:
+    sys.stderr.write('Warning: pySerial not installed, will not connect Arduino.\n')
+
 import numpy as np
 from matplotlib import pyplot as plt
 import visual
@@ -328,6 +333,30 @@ class Quaternion(object):
         q3 = v[2] * np.sin(theta / 2)
         return cls([q0, q1, q2, q3])
 
+    @classmethod
+    def random(cls):
+        """
+        This algorithm comes from http://planning.cs.uiuc.edu/node198.html
+        """
+        u1, u2, u3 = np.random.random(3)
+
+        q0 = math.sqrt(1 - u1) * math.sin(2 * math.pi * u2)
+        q1 = math.sqrt(1 - u1) * math.cos(2 * math.pi * u2)    
+        q2 = math.sqrt(u1) * math.sin(2 * math.pi * u3)
+        q3 = math.sqrt(u1) * math.cos(2 * math.pi * u3)
+
+        return cls((q0, q1, q2, q3))
+
+    @property
+    def rotation_vector(self):
+
+        abs_q = math.sqrt(self.q[1] * self.q[1] + self.q[2] * self.q[2]\
+                      + self.q[3] * self.q[3])
+
+        v = (self.q[1:] / abs_q).A1.tolist()
+        theta = 2 * math.acos(self.q[0])
+        return (v, theta)
+
     @property
     def matrix_repr(self):
         qa = self.q.A1 # array
@@ -383,6 +412,9 @@ class Quaternion(object):
         a[2] = -a[2]
         a[3] = -a[3]
         return Quaternion(a)
+
+    def __repr__(self):
+        return '<Quaternion q0=%s, q1=%s, q2=%s, q3=%s>' % tuple(self.q.A1)
 
     def unitize(self):
         self.q = self.q / norm4(self.q)
