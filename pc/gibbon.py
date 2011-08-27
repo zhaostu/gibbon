@@ -353,6 +353,9 @@ class Quaternion(object):
         abs_q = math.sqrt(self.q[1] * self.q[1] + self.q[2] * self.q[2]\
                       + self.q[3] * self.q[3])
 
+        if abs_q == 0:
+            return ([1, 0, 0], 0)
+
         v = (self.q[1:] / abs_q).A1.tolist()
         theta = 2 * math.acos(self.q[0])
         return (v, theta)
@@ -508,7 +511,7 @@ class EKalman(object):
 
     def naive_time_update(self, gyro, dt):
         q = Quaternion.from_gyro(gyro, dt)
-        self.x = self.x * q
+        self.x *= q
 
     def time_update(self, gyro, dt, Q):
         '''
