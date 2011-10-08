@@ -26,7 +26,7 @@ class Emulator():
         self.id = 0
         self.t = 0
         self.mag_prev = None
-        self.mag_prev_t = -1
+        self.mag_prev_t = -10**6
 
         self.database = database
         self.gesture = gesture
@@ -86,15 +86,15 @@ class Emulator():
         # Adding random noise to accelerometer data
         for i in range(len(acc)):
             if stable:
-                acc[i] += random.normalvariate(0, sqrt(self.ACC_ERROR_S))
+                acc[i] += random.gauss(0, sqrt(self.ACC_ERROR_S))
             else:
-                acc[i] += random.normalvariate(0, sqrt(self.ACC_ERROR_D))
+                acc[i] += random.gauss(0, sqrt(self.ACC_ERROR_D))
 
         # Adding random noise to magnetometer data
         for i in range(len(mag)):
-            mag[i] += random.normalvariate(0, sqrt(self.MAG_ERROR))
+            mag[i] += random.gauss(0, sqrt(self.MAG_ERROR))
 
-        if self.t - self.mag_prev_t >= 1 / self.FREQ_MAG:
+        if self.t - self.mag_prev_t >= 1 / self.FREQ_MAG * 10**6:
             self.mag_prev_t = self.t
             self.mag_prev = mag
         else:
